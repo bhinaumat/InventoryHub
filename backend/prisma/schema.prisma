@@ -1,0 +1,139 @@
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id           String    @id @default(uuid())
+  name         String
+  email        String    @unique
+  passwordHash String
+  role         String    @default("Staff") // "Manager" | "Staff"
+  otpCode      String?
+  otpExpiry    DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+model Category {
+  id          String    @id @default(uuid())
+  name        String    @unique
+  description String?
+  products    Product[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model Product {
+  id             String          @id @default(uuid())
+  name           String
+  sku            String          @unique
+  categoryId     String
+  category       Category        @relation(fields: [categoryId], references: [id])
+  unitOfMeasure  String          @default("Units")
+  price          Float           @default(0)
+  reorderLevel   Int             @default(0)
+  inventories    Inventory[]
+  operationItems OperationItem[]
+  stockLedgers   StockLedger[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+}
+
+model Warehouse {
+  id        String     @id @default(uuid())
+  name      String     @unique
+  address   String?
+  locations Location[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+}
+
+model Location {
+  id          String      @id @default(uuid())
+  name        String
+  warehouseId String
+  warehouse   Warehouse   @relation(fields: [warehouseId], references: [id])
+  inventories Inventory[]
+
+  sourceOperations Operation[] @relation("SourceLocation")
+  destOperations   Operation[] @relation("DestLocation")
+
+  sourceLedgers StockLedger[] @relation("LedgerSourceLocation")
+  destLedgers   StockLedger[] @relation("LedgerDestLocation")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Inventory {
+  id         String   @id @default(uuid())
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id])
+  locationId String
+  location   Location @relation(fields: [locationId], references: [id])
+  quantity   Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([productId, locationId])
+}
+
+model Operation {
+  id               String          @id @default(uuid())
+  referenceNumber  String          @unique
+  type             String // 'Receipt' | 'Delivery' | 'Transfer' | 'Adjustment'
+  status           String          @default("Draft") // 'Draft' | 'Waiting' | 'Ready' | 'Done' | 'Cancelled'
+  date             DateTime        @default(now())
+  sourceLocationId String?
+  sourceLocation   Location?       @relation("SourceLocation", fields: [sourceLocationId], references: [id])
+  destLocationId   String?
+  destLocation     Location?       @relation("DestLocation", fields: [destLocationId], references: [id])
+  notes            String?
+  items            OperationItem[]
+  stockLedgers     StockLedger[]
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+}
+
+model OperationItem {
+  id          String    @id @default(uuid())
+  operationId String
+  operation   Operation @relation(fields: [operationId], references: [id], onDelete: Cascade)
+  productId   String
+  product     Product   @relation(fields: [productId], references: [id])
+  quantity    Int
+}
+
+model StockLedger {
+  id                  String     @id @default(uuid())
+  date                DateTime   @default(now())
+  productId           String
+  product             Product    @relation(fields: [productId], references: [id])
+  quantity            Int
+  sourceLocationId    String?
+  sourceLocation      Location?  @relation("LedgerSourceLocation", fields: [sourceLocationId], references: [id])
+  destLocationId      String?
+  destLocation        Location?  @relation("LedgerDestLocation", fields: [destLocationId], references: [id])
+  operationType       String
+  referenceDocumentId String?
+  referenceDocument   Operation? @relation(fields: [referenceDocumentId], references: [id])
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
+}
+
+model Client {
+  id        String   @id @default(uuid())
+  name      String
+  email     String?  @unique
+  phone     String?
+  company   String?
+  type      String   @default("Customer") // "Customer" | "Supplier" | "Partner"
+  status    String   @default("Active") // "Active" | "Inactive"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

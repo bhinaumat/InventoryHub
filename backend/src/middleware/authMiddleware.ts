@@ -3,6 +3,13 @@ import jsonwebtoken from 'jsonwebtoken';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'ims-secret-key-1234';
 
+interface JwtPayload {
+    user: {
+        id: string;
+        role: string;
+    };
+}
+
 export interface AuthRequest extends Request {
     user?: {
         id: string;
@@ -23,7 +30,7 @@ export const protect = (req: AuthRequest, res: Response, next: NextFunction): vo
     }
 
     try {
-        const decoded = jsonwebtoken.verify(token, JWT_SECRET) as any;
+        const decoded = jsonwebtoken.verify(token, JWT_SECRET) as JwtPayload;
         req.user = decoded.user;
         next();
     } catch (error) {

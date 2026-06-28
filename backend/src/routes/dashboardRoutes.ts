@@ -9,14 +9,13 @@ router.get('/', protect, async (req: Request, res: Response) => {
         const totalProducts = await prisma.product.count();
 
         // Low stock items
-        const inventories = await prisma.inventory.findMany({ include: { product: true } });
-        let lowStockCount = 0;
-        inventories.forEach((inv: any) => {
-            const prod = inv.product as any;
-            if (prod.reorderLevel && inv.quantity <= prod.reorderLevel) {
-                lowStockCount++;
-            }
-        });
+        const result = await prisma.$queryRaw<Array<{ count: number }>>`
+            SELECT COUNT(*) as count 
+            FROM "Inventory" i
+            JOIN "Product" p ON i."productId" = p."id"
+            WHERE i."quantity" <= p."reorderLevel" AND p."reorderLevel" > 0
+        `;
+        const lowStockCount = Number(result[0]?.count || 0);
 
         const pendingImports = await prisma.operation.count({ where: { type: 'Import', status: { not: 'Done' } } });
         const pendingExports = await prisma.operation.count({ where: { type: 'Export', status: { not: 'Done' } } });

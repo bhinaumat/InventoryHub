@@ -29,4 +29,16 @@ router.post('/', protect, async (req: Request, res: Response) => {
     }
 });
 
+// Delete a client
+router.delete('/:id', protect, async (req: Request, res: Response): Promise<any> => {
+    try {
+        await prisma.client.delete({
+            where: { id: req.params.id as string }
+        });
+        res.json({ message: 'Client deleted successfully' });
+    } catch (err: any) {
+        res.status(500).json({ message: 'Server Error' });
+    }
+});
+
 export default router;

@@ -2,18 +2,25 @@ import express, { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jsonwebtoken from 'jsonwebtoken';
 import prisma from '../prisma';
+import { sendOTP } from '../services/smsService';
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'ims-secret-key-1234';
 
-// Mock Email sender
-const sendEmail = async (email: string, subject: string, text: string) => {
-    console.log(`\n=== MOCK EMAIL SENT ===\nTo: ${email}\nSubject: ${subject}\nText: ${text}\n========================\n`);
+// Generate a 6-digit OTP
+const generateOTP = (): string => {
+    return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
 router.post('/register', async (req: Request, res: Response): Promise<any> => {
     try {
-        const { name, email, password, role } = req.body;
+        const { name, email, password, phone } = req.body;
+
+        if (!name || !email || !password) {
+            return res.status(400).json({ message: 'Name, email, and password are required' });
+        }
+
+        const role = 'Staff'; // Force role — only admins can promote
         let user = await prisma.user.findUnique({ where: { email } });
         if (user) return res.status(400).json({ message: 'User already exists' });
 
@@ -21,13 +28,13 @@ router.post('/register', async (req: Request, res: Response): Promise<any> => {
         const passwordHash = await bcrypt.hash(password, salt);
 
         user = await prisma.user.create({
-            data: { name, email, passwordHash, role }
+            data: { name, email, passwordHash, role, phone: phone || null }
         });
 
         const payload = { user: { id: user.id, role: user.role } };
         const token = jsonwebtoken.sign(payload, JWT_SECRET, { expiresIn: '1d' });
 
-        res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
+        res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role, phone: user.phone } });
     } catch (err: any) {
         res.status(500).json({ message: 'Server Error' });
     }
@@ -36,6 +43,9 @@ router.post('/register', async (req: Request, res: Response): Promise<any> => {
 router.post('/login', async (req: Request, res: Response): Promise<any> => {
     try {
         const { email, password } = req.body;
+        if (!email || !password) {
+            return res.status(400).json({ message: 'Email and password are required' });
+        }
         const user = await prisma.user.findUnique({ where: { email } });
         if (!user) return res.status(400).json({ message: 'Invalid Credentials' });
 
@@ -43,7 +53,7 @@ router.post('/login', async (req: Request, res: Response): Promise<any> => {
         if (!isMatch) return res.status(400).json({ message: 'Invalid Credentials' });
 
         // Generate OTP
-        const otpCode = Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit OTP
+        const otpCode = generateOTP();
         const otpExpiry = new Date(Date.now() + 5 * 60 * 1000); // 5 mins expiry
 
         await prisma.user.update({
@@ -51,9 +61,31 @@ router.post('/login', async (req: Request, res: Response): Promise<any> => {
             data: { otpCode, otpExpiry }
         });
 
-        await sendEmail(email, 'Login OTP Verification', `Your login OTP is: ${otpCode}`);
+        // Send OTP via SMS if phone exists, otherwise fallback to console
+        if (user.phone) {
+            await sendOTP(user.phone, otpCode);
+        } else {
+            console.log(`\n========================================`);
+            console.log(`  📱 SMS OTP (No phone on file)`);
+            console.log(`  User: ${user.email}`);
+            console.log(`  OTP: ${otpCode}`);
+            console.log(`  ⚠️  Add phone number to user profile`);
+            console.log(`========================================\n`);
+        }
 
-        res.json({ message: 'OTP sent to email (check server console)', requireOtp: true, email: user.email });
+        // Mask phone number for display
+        const maskedPhone = user.phone
+            ? user.phone.replace(/(\d{2})\d{6}(\d{2})/, '$1******$2')
+            : null;
+
+        res.json({
+            message: user.phone
+                ? `OTP sent to ${maskedPhone}`
+                : 'OTP sent (check server console — no phone number on file)',
+            requireOtp: true,
+            email: user.email,
+            maskedPhone
+        });
     } catch (err: any) {
         res.status(500).json({ message: 'Server Error' });
     }
@@ -81,7 +113,7 @@ router.post('/verify-login-otp', async (req: Request, res: Response): Promise<an
         const payload = { user: { id: user.id, role: user.role } };
         const token = jsonwebtoken.sign(payload, JWT_SECRET, { expiresIn: '1d' });
 
-        res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
+        res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role, phone: user.phone } });
     } catch (err: any) {
         res.status(500).json({ message: 'Server Error' });
     }
@@ -89,21 +121,49 @@ router.post('/verify-login-otp', async (req: Request, res: Response): Promise<an
 
 router.post('/forgot-password', async (req: Request, res: Response): Promise<any> => {
     try {
-        const { email } = req.body;
-        const user = await prisma.user.findUnique({ where: { email } });
+        const { email, phone } = req.body;
+
+        // Find user by email or phone
+        let user;
+        if (email) {
+            user = await prisma.user.findUnique({ where: { email } });
+        } else if (phone) {
+            const cleanPhone = phone.replace(/[\s\-\+]/g, '').replace(/^91/, '');
+            user = await prisma.user.findFirst({ where: { phone: { contains: cleanPhone } } });
+        }
+
         if (!user) return res.status(404).json({ message: 'User not found' });
 
-        const otpCode = Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit OTP
+        const otpCode = generateOTP();
         const otpExpiry = new Date(Date.now() + 15 * 60 * 1000); // 15 mins
-        
+
         await prisma.user.update({
-            where: { email },
+            where: { id: user.id },
             data: { otpCode, otpExpiry }
         });
 
-        await sendEmail(email, 'Password Reset OTP', `Your OTP for password reset is: ${otpCode}`);
+        // Send OTP via SMS
+        if (user.phone) {
+            await sendOTP(user.phone, otpCode);
+        } else {
+            console.log(`\n========================================`);
+            console.log(`  📱 Password Reset OTP (No phone)`);
+            console.log(`  User: ${user.email}`);
+            console.log(`  OTP: ${otpCode}`);
+            console.log(`========================================\n`);
+        }
 
-        res.json({ message: 'OTP sent to email (check server console)' });
+        const maskedPhone = user.phone
+            ? user.phone.replace(/(\d{2})\d{6}(\d{2})/, '$1******$2')
+            : null;
+
+        res.json({
+            message: user.phone
+                ? `OTP sent to ${maskedPhone}`
+                : 'OTP sent (check server console)',
+            email: user.email,
+            maskedPhone
+        });
     } catch (err: any) {
         res.status(500).json({ message: 'Server Error' });
     }
@@ -112,6 +172,9 @@ router.post('/forgot-password', async (req: Request, res: Response): Promise<any
 router.post('/reset-password', async (req: Request, res: Response): Promise<any> => {
     try {
         const { email, otpCode, newPassword } = req.body;
+        if (!email || !otpCode || !newPassword) {
+            return res.status(400).json({ message: 'Email, OTP code, and new password are required' });
+        }
         const user = await prisma.user.findUnique({ where: { email } });
 
         if (!user || !user.otpCode || !user.otpExpiry) {
@@ -124,7 +187,7 @@ router.post('/reset-password', async (req: Request, res: Response): Promise<any>
 
         const salt = await bcrypt.genSalt(10);
         const passwordHash = await bcrypt.hash(newPassword, salt);
-        
+
         await prisma.user.update({
             where: { email },
             data: {

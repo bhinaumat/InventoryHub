@@ -28,4 +28,15 @@ router.post('/', protect, managerOnly, async (req: Request, res: Response): Prom
     }
 });
 
+router.delete('/:id', protect, managerOnly, async (req: Request, res: Response): Promise<any> => {
+    try {
+        await prisma.warehouse.delete({
+            where: { id: req.params.id as string }
+        });
+        res.json({ message: 'Warehouse deleted successfully' });
+    } catch (err: any) {
+        res.status(500).json({ message: 'Server Error' });
+    }
+});
+
 export default router;

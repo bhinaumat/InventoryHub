@@ -43,4 +43,15 @@ router.get('/:id/inventory', protect, async (req: Request, res: Response): Promi
     }
 });
 
+router.delete('/:id', protect, managerOnly, async (req: Request, res: Response): Promise<any> => {
+    try {
+        await prisma.product.delete({
+            where: { id: req.params.id as string }
+        });
+        res.json({ message: 'Product deleted successfully' });
+    } catch (err: any) {
+        res.status(500).json({ message: 'Server Error' });
+    }
+});
+
 export default router;
